@@ -6,6 +6,7 @@ import '../models/survey.dart';
 import '../models/survey_enums.dart';
 import 'drive_service.dart';
 import 'hwpx_builder.dart';
+import 'upload_queue.dart';
 
 /// 제출 산출물 한 항목의 진행 상태.
 class SubmitItem {
@@ -35,10 +36,11 @@ class SubmitProgress {
 /// 항목끼리 서로를 기다리지 않는다. 하나가 실패해도 나머지는 올라가고,
 /// 실패한 것만 다시 시도할 수 있다.
 class SubmitService {
-  SubmitService(this._drive, {HwpxBuilder? hwpx})
+  SubmitService(this._drive, this._queue, {HwpxBuilder? hwpx})
     : _hwpx = hwpx ?? const HwpxBuilder();
 
   final DriveService _drive;
+  final UploadQueue _queue;
   final HwpxBuilder _hwpx;
 
   static const String hwpxKey = 'hwpx';
@@ -93,6 +95,8 @@ class SubmitService {
 
     if (progress.isDone) {
       survey.submittedAt = DateTime.now();
+      // 정본이 드라이브에 모두 올라갔으니 기기 보관본을 비운다.
+      await _queue.releaseSurvey(survey);
       onChanged();
     }
   }
@@ -102,12 +106,19 @@ class SubmitService {
       case hwpxKey:
         return _uploadHwpx(survey);
       case photosKey:
-        // 사진은 촬영 시점에 이미 올라갔다. 여기서는 확인만 한다.
+        // 사진은 촬영 직후 큐가 올린다. 남은 것이 있으면 여기서 한 번 밀어 본다.
+        if (survey.photos.any((p) => p.state != UploadState.done)) {
+          await _queue.drain();
+        }
         final pending = survey.photos
             .where((p) => p.state != UploadState.done)
             .length;
         if (pending > 0) {
-          throw DriveException('업로드되지 않은 사진이 $pending장 있습니다. 촬영 화면에서 재시도하세요.');
+          throw DriveException(
+            _queue.isOnline
+                ? '업로드되지 않은 사진이 $pending장 있습니다. 잠시 후 다시 시도해 주세요.'
+                : '오프라인입니다. 사진 $pending장이 기기에 보관돼 있으며 연결되면 자동으로 올라갑니다.',
+          );
         }
         return survey.driveFolderLink;
       case jsonKey:
@@ -122,11 +133,13 @@ class SubmitService {
 
   Future<String?> _uploadHwpx(Survey survey) async {
     // 조사표에 넣을 사진은 템플릿 사진칸 수까지만 필요하다. 원본은 드라이브에
-    // 있으므로 여기서는 앱이 들고 있는 축소본을 쓴다.
-    final photos = survey.photos
-        .map((p) => p.thumbnail)
-        .whereType<Uint8List>()
-        .toList();
+    // 있으므로 여기서는 보관된 축소본을 쓴다. 탭을 새로고침해 메모리 캐시가
+    // 비었어도 보관소에서 되살아난다.
+    final photos = <Uint8List>[];
+    for (final photo in survey.photos) {
+      final thumbnail = await _queue.thumbnailOf(photo);
+      if (thumbnail != null) photos.add(thumbnail);
+    }
 
     final bytes = await _hwpx.build(
       values: survey.toTemplateValues(),

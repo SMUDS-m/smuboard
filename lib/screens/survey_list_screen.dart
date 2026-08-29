@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 
 import '../app_services.dart';
 import '../models/survey.dart';
+import '../services/upload_queue.dart';
 import '../widgets/smuds_logo.dart';
 import 'survey_overview_screen.dart';
 
@@ -71,6 +72,7 @@ class _SurveyListScreenState extends State<SurveyListScreen> {
         titleSpacing: 16,
         title: const SmudsLogo(height: 30),
         actions: <Widget>[
+          _PendingIndicator(queue: AppScope.of(context).queue),
           if (account != null)
             PopupMenuButton<String>(
               tooltip: account.email,
@@ -124,6 +126,43 @@ class _SurveyListScreenState extends State<SurveyListScreen> {
                       ),
               ),
             ),
+    );
+  }
+}
+
+/// 업로드를 기다리는 사진이 있을 때만 보이는 표시.
+///
+/// 오프라인에서 촬영만 하고 앱을 닫았다가 다시 연 사용자가, 사진이 아직
+/// 기기에 있다는 것을 목록 화면에서 바로 알 수 있어야 한다.
+class _PendingIndicator extends StatelessWidget {
+  const _PendingIndicator({required this.queue});
+
+  final UploadQueue queue;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: queue,
+      builder: (context, _) {
+        if (queue.pendingCount == 0) return const SizedBox.shrink();
+        final offline = !queue.isOnline;
+        return Padding(
+          padding: const EdgeInsets.only(right: 4),
+          child: TextButton.icon(
+            onPressed: queue.isDraining ? null : queue.drain,
+            icon: Icon(
+              offline ? Icons.cloud_off : Icons.cloud_upload_outlined,
+              size: 18,
+            ),
+            label: Text('${queue.pendingCount}'),
+            style: TextButton.styleFrom(
+              foregroundColor: offline
+                  ? Theme.of(context).colorScheme.tertiary
+                  : Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        );
+      },
     );
   }
 }

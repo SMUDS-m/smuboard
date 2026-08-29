@@ -7,6 +7,7 @@ import '../models/sketch_map_options.dart';
 import '../models/survey.dart';
 import '../models/survey_enums.dart';
 import '../models/survey_photo.dart';
+import '../services/upload_queue.dart';
 import '../widgets/board_painter.dart';
 import 'survey_form_screen.dart';
 
@@ -26,20 +27,52 @@ class _CaptureScreenState extends State<CaptureScreen> {
   bool _working = false;
   ui.Image? _previewSketch;
   String _sketchKey = '';
+  UploadQueue? _queue;
 
   Survey get _survey => widget.survey;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshSketch());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshSketch();
+      _restoreThumbnails();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final queue = AppScope.of(context).queue;
+    // 지난 세션에서 넘어온 조사도 갱신 대상으로 등록한다. 이걸 빠뜨리면 큐가
+    // 저장소 사본만 고쳐, 화면이 쥔 사진 상태가 대기에 머문 것처럼 보인다.
+    queue.track(_survey);
+    if (identical(queue, _queue)) return;
+    _queue?.removeListener(_onQueueChanged);
+    _queue = queue..addListener(_onQueueChanged);
   }
 
   @override
   void dispose() {
+    _queue?.removeListener(_onQueueChanged);
     _caption.dispose();
     _previewSketch?.dispose();
     super.dispose();
+  }
+
+  void _onQueueChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// 탭을 새로고침하면 메모리의 축소본이 비어 있다. 보관소에서 되살린다.
+  Future<void> _restoreThumbnails() async {
+    final queue = AppScope.of(context).queue;
+    var restored = false;
+    for (final photo in _survey.photos) {
+      if (photo.thumbnail != null) continue;
+      if (await queue.thumbnailOf(photo) != null) restored = true;
+    }
+    if (restored && mounted) setState(() {});
   }
 
   void _save() => AppScope.of(context).store.save(_survey);
@@ -100,26 +133,20 @@ class _CaptureScreenState extends State<CaptureScreen> {
         survey: _survey,
         photoBytes: bytes,
         caption: _caption.text.trim(),
-        onUploaded: () {
-          if (mounted) setState(() {});
-          _save();
-        },
       );
       _caption.clear();
       if (mounted) setState(() {});
       _save();
     } catch (e) {
-      _toast('사진을 가져오지 못했습니다: $e');
+      _toast('사진을 처리하지 못했습니다: $e');
     } finally {
       if (mounted) setState(() => _working = false);
     }
   }
 
-  Future<void> _retry(SurveyPhoto photo) async {
-    await AppScope.of(context).photos.retry(_survey, photo, () {
-      if (mounted) setState(() {});
-      _save();
-    });
+  Future<void> _retryUploads() async {
+    await AppScope.of(context).queue.drain();
+    if (mounted) setState(() {});
   }
 
   void _toast(String message) {
@@ -208,6 +235,11 @@ class _CaptureScreenState extends State<CaptureScreen> {
                 ],
               ),
 
+              if (!services.queue.isOnline || pending > 0) ...<Widget>[
+                const SizedBox(height: 14),
+                _QueueBanner(queue: services.queue, pending: pending),
+              ],
+
               const SizedBox(height: 22),
               _sketchSettings(services.vworld.isConfigured),
 
@@ -220,20 +252,21 @@ class _CaptureScreenState extends State<CaptureScreen> {
                   ),
                   const Spacer(),
                   if (pending > 0)
-                    Text(
-                      '업로드 대기 $pending',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.error,
-                      ),
+                    TextButton.icon(
+                      onPressed: services.queue.isDraining
+                          ? null
+                          : _retryUploads,
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('지금 올리기'),
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               if (_survey.photos.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 20),
                   child: Text(
-                    '촬영한 사진은 합성 직후 드라이브로 올라갑니다.',
+                    '촬영한 사진은 기기에 먼저 보관되고, 연결되는 대로 드라이브에 올라갑니다.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
@@ -251,10 +284,8 @@ class _CaptureScreenState extends State<CaptureScreen> {
                         crossAxisSpacing: 8,
                       ),
                   itemCount: _survey.photos.length,
-                  itemBuilder: (context, index) => _PhotoTile(
-                    photo: _survey.photos[index],
-                    onRetry: () => _retry(_survey.photos[index]),
-                  ),
+                  itemBuilder: (context, index) =>
+                      _PhotoTile(photo: _survey.photos[index]),
                 ),
             ],
           ),
@@ -365,6 +396,76 @@ class _CaptureScreenState extends State<CaptureScreen> {
   }
 }
 
+/// 오프라인이거나 올릴 것이 남았을 때만 보이는 상태 줄.
+///
+/// "실패"가 아니라 "보관됨"이라고 말한다 - 통신이 없는 것은 사용자 잘못이
+/// 아니고, 사진은 실제로 안전하게 남아 있기 때문이다.
+class _QueueBanner extends StatelessWidget {
+  const _QueueBanner({required this.queue, required this.pending});
+
+  final UploadQueue queue;
+  final int pending;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final offline = !queue.isOnline;
+    final tone = offline
+        ? theme.colorScheme.tertiary
+        : theme.colorScheme.primary;
+
+    final String message;
+    if (offline) {
+      message = pending > 0
+          ? '오프라인입니다. 사진 $pending장이 기기에 보관돼 있고, 연결되면 자동으로 올라갑니다.'
+          : '오프라인입니다. 촬영은 계속할 수 있고, 연결되면 자동으로 올라갑니다.';
+    } else if (queue.isDraining) {
+      message = '사진 $pending장을 올리는 중입니다.';
+    } else {
+      final retryIn = queue.retryIn;
+      message = retryIn == null
+          ? '사진 $pending장이 업로드를 기다리고 있습니다.'
+          : '사진 $pending장 대기 중. ${retryIn.inSeconds}초 뒤 다시 시도합니다.';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.08),
+        border: Border(left: BorderSide(color: tone, width: 3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(
+            offline ? Icons.cloud_off : Icons.cloud_upload_outlined,
+            size: 18,
+            color: tone,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(message, style: theme.textTheme.bodySmall),
+                if (queue.lastError != null && !offline) ...<Widget>[
+                  const SizedBox(height: 4),
+                  Text(
+                    queue.lastError!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 촬영 전에 보드와 약도가 어떻게 찍힐지 보여 준다. 최종 합성과 같은 페인터다.
 class _BoardPreview extends StatelessWidget {
   const _BoardPreview({required this.survey, this.sketchMap});
@@ -399,10 +500,9 @@ class _BoardPreview extends StatelessWidget {
 }
 
 class _PhotoTile extends StatelessWidget {
-  const _PhotoTile({required this.photo, required this.onRetry});
+  const _PhotoTile({required this.photo});
 
   final SurveyPhoto photo;
-  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -438,7 +538,7 @@ class _PhotoTile extends StatelessWidget {
                       style: const TextStyle(color: Colors.white, fontSize: 10),
                     ),
                   ),
-                  _StateBadge(photo: photo, onRetry: onRetry),
+                  _StateBadge(photo: photo),
                 ],
               ),
             ),
@@ -450,10 +550,9 @@ class _PhotoTile extends StatelessWidget {
 }
 
 class _StateBadge extends StatelessWidget {
-  const _StateBadge({required this.photo, required this.onRetry});
+  const _StateBadge({required this.photo});
 
   final SurveyPhoto photo;
-  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -464,17 +563,18 @@ class _StateBadge extends StatelessWidget {
         height: 11,
         child: CircularProgressIndicator(strokeWidth: 1.6, color: Colors.white),
       ),
-      UploadState.failed => InkWell(
-        onTap: onRetry,
-        child: Tooltip(
-          message: photo.error ?? '업로드 실패 - 눌러서 재시도',
-          child: const Icon(Icons.refresh, size: 14, color: Colors.orangeAccent),
+      UploadState.failed => Tooltip(
+        message: photo.error ?? '업로드 실패',
+        child: const Icon(
+          Icons.error_outline,
+          size: 14,
+          color: Colors.orangeAccent,
         ),
       ),
-      UploadState.pending => const Icon(
-        Icons.schedule,
-        size: 13,
-        color: Colors.white70,
+      // 대기는 실패가 아니다. 기기에 보관돼 있고 연결되면 자동으로 올라간다.
+      UploadState.pending => Tooltip(
+        message: photo.error ?? '업로드 대기 - 기기에 보관됨',
+        child: const Icon(Icons.schedule, size: 13, color: Colors.white70),
       ),
     };
   }

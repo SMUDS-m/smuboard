@@ -25,7 +25,9 @@ class _SubmitScreenState extends State<SubmitScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _progress = AppScope.of(context).submit.createProgress(_survey);
+    final services = AppScope.of(context);
+    services.queue.track(_survey);
+    _progress = services.submit.createProgress(_survey);
   }
 
   Future<void> _submit() async {

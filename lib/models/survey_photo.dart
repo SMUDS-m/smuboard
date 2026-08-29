@@ -4,9 +4,9 @@ import 'survey_enums.dart';
 
 /// 현장사진 한 장.
 ///
-/// 합성이 끝난 바이트는 업로드 직후 버린다. 모바일 웹 탭 메모리에 수십 장을
-/// 들고 있을 수 없기 때문이다. 화면에는 [thumbnail]만 남기고, 원본은 드라이브의
-/// [driveFileId]가 정본이 된다.
+/// 합성 원본은 IndexedDB에 보관했다가 업로드가 확인되면 지운다(UploadQueue).
+/// 메모리에는 [thumbnail]만 들고 있으며, 이것도 보관소에 복사본이 있어 탭을
+/// 새로고침해도 복구된다. 업로드가 끝난 뒤의 정본은 드라이브의 [driveFileId]다.
 class SurveyPhoto {
   SurveyPhoto({
     required this.id,
@@ -30,8 +30,8 @@ class SurveyPhoto {
   final double? latitude;
   final double? longitude;
 
-  /// 목록 표시용 축소 이미지. 세션이 끝나면 사라진다.
-  final Uint8List? thumbnail;
+  /// 목록 표시용 축소 이미지. 메모리 캐시이며, 원본은 보관소에 있다.
+  Uint8List? thumbnail;
 
   String? driveFileId;
   String? driveLink;
