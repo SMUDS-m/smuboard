@@ -31,11 +31,19 @@
 
 보관본이 사라진 경우(브라우저 사이트 데이터 삭제 등)에만 "다시 촬영" 안내가 뜬다.
 
-IndexedDB 동작을 직접 확인하려면:
+동작 확인용 개발 진입점이 둘 있다. 배포 번들에는 들어가지 않는다.
 
 ```bash
+# IndexedDB 보관소 자체 (저장·복구·삭제·용량)
 flutter run -d chrome -t lib/dev/offline_check.dart
+
+# 오프라인 촬영 시나리오 전체. 1단계 실행 → 페이지 새로고침 → 2단계 자동 진행
+flutter run -d chrome -t lib/dev/offline_capture_check.dart --dart-define=VWORLD_KEY=...
 ```
+
+`offline_capture_check`는 드라이브만 가짜로 두고 IndexedDB·큐·합성 파이프라인은
+실제 코드를 그대로 쓴다. 1단계에서 오프라인으로 두 장을 찍어 보관되는지 보고,
+브라우저를 진짜 새로고침한 뒤 2단계에서 복구·자동 업로드·보관본 정리를 검사한다.
 
 ## 산출물
 
