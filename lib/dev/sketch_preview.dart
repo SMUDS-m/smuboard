@@ -40,7 +40,7 @@ class _Preview extends StatefulWidget {
 class _PreviewState extends State<_Preview> {
   final VWorldService _vworld = VWorldService();
 
-  ui.Image? _sketch;
+  final Map<VWorldLayer, ui.Image> _sketches = <VWorldLayer, ui.Image>{};
   String _status = '불러오는 중…';
   String _address = '';
 
@@ -60,17 +60,19 @@ class _PreviewState extends State<_Preview> {
       return;
     }
     try {
-      final image = await _vworld.renderSketchMap(
-        latitude: _lat,
-        longitude: _lng,
-        size: const Size(520, 390),
-        zoom: 17,
-      );
+      for (final layer in VWorldLayer.values) {
+        _sketches[layer] = await _vworld.renderSketchMap(
+          latitude: _lat,
+          longitude: _lng,
+          size: const Size(520, 390),
+          zoom: 17,
+          layer: layer,
+        );
+      }
       final address = await _vworld.reverseGeocode(_lat, _lng);
       setState(() {
-        _sketch = image;
         _address = address?.preferred ?? '(주소 변환 실패)';
-        _status = '약도 ${image.width}x${image.height} · $_address';
+        _status = '레이어 ${_sketches.length}종 · $_address';
       });
     } catch (e) {
       setState(() => _status = '실패: $e');
@@ -97,13 +99,16 @@ class _PreviewState extends State<_Preview> {
         children: <Widget>[
           Text(_status),
           const SizedBox(height: 12),
-          const Text('1) 약도 단독'),
-          const SizedBox(height: 6),
-          if (_sketch != null)
+          for (final entry in _sketches.entries) ...<Widget>[
+            Text('${entry.key.label} (${entry.key.id}'
+                '${entry.key.overlayId == null ? '' : ' + ${entry.key.overlayId}'})'),
+            const SizedBox(height: 6),
             SizedBox(
-              height: 260,
-              child: CustomPaint(painter: _RawImagePainter(_sketch!)),
+              height: 240,
+              child: CustomPaint(painter: _RawImagePainter(entry.value)),
             ),
+            const SizedBox(height: 16),
+          ],
           const SizedBox(height: 20),
           const Text('2) 사진 위 합성 결과(보드 + 약도)'),
           const SizedBox(height: 6),
@@ -112,7 +117,10 @@ class _PreviewState extends State<_Preview> {
             child: ColoredBox(
               color: const Color(0xFF7C8A94),
               child: CustomPaint(
-                painter: BoardPainter(board, sketchMap: _sketch),
+                painter: BoardPainter(
+                  board,
+                  sketchMap: _sketches[VWorldLayer.satellite],
+                ),
               ),
             ),
           ),

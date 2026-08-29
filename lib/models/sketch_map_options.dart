@@ -1,10 +1,14 @@
 /// 약도에 쓸 브이월드 배경지도 종류.
+///
+/// 브이월드 WMTS가 실제로 받는 이름만 둔다. 없는 이름을 보내면 이미지 대신
+/// `InvalidParameterValue` XML이 돌아와 약도가 빈칸이 된다.
 enum VWorldLayer {
   base('Base', 'png', '일반'),
-  satellite('Satellite', 'jpeg', '위성'),
-  gray('gray', 'png', '회색');
+  // 위성 영상만으로는 어디가 어딘지 읽기 어렵다. 도로·지명이 담긴 Hybrid를
+  // 위에 겹쳐야 약도 구실을 한다.
+  satellite('Satellite', 'jpeg', '위성', overlayId: 'Hybrid');
 
-  const VWorldLayer(this.id, this.extension, this.label);
+  const VWorldLayer(this.id, this.extension, this.label, {this.overlayId});
 
   /// WMTS 경로에 들어가는 레이어 이름.
   final String id;
@@ -14,6 +18,9 @@ enum VWorldLayer {
 
   /// UI에 보여줄 이름.
   final String label;
+
+  /// 배경 위에 겹칠 레이어. 없으면 null.
+  final String? overlayId;
 
   static VWorldLayer fromId(String? id) => values.firstWhere(
     (layer) => layer.id == id,

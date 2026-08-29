@@ -114,17 +114,35 @@ class VWorldService {
     final lastY = math.min(maxTile, ((top + size.height) / tileSize).ceil() - 1);
 
     // 타일은 병렬로 받는다. 실패한 타일은 빈칸으로 두고 나머지를 그린다.
-    final requests = <({int x, int y, Future<ui.Image?> image})>[];
-    for (var ty = firstY; ty <= lastY; ty++) {
-      for (var tx = firstX; tx <= lastX; tx++) {
-        final wrappedX = tx % (maxTile + 1);
-        requests.add((
-          x: tx,
-          y: ty,
-          image: _tile(layer, clampedZoom, wrappedX < 0 ? wrappedX + maxTile + 1 : wrappedX, ty),
-        ));
+    List<({int x, int y, Future<ui.Image?> image})> requestsFor(
+      String layerId,
+      String extension,
+    ) {
+      final requests = <({int x, int y, Future<ui.Image?> image})>[];
+      for (var ty = firstY; ty <= lastY; ty++) {
+        for (var tx = firstX; tx <= lastX; tx++) {
+          final wrapped = tx % (maxTile + 1);
+          requests.add((
+            x: tx,
+            y: ty,
+            image: _tile(
+              layerId,
+              extension,
+              clampedZoom,
+              wrapped < 0 ? wrapped + maxTile + 1 : wrapped,
+              ty,
+            ),
+          ));
+        }
       }
+      return requests;
     }
+
+    final base = requestsFor(layer.id, layer.extension);
+    final overlayId = layer.overlayId;
+    final overlay = overlayId == null
+        ? const <({int x, int y, Future<ui.Image?> image})>[]
+        : requestsFor(overlayId, 'png');
 
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
@@ -132,14 +150,20 @@ class VWorldService {
     canvas.clipRect(bounds);
     canvas.drawRect(bounds, Paint()..color = const Color(0xFFE9E6DF));
 
-    for (final request in requests) {
-      final tile = await request.image;
-      if (tile == null) continue;
-      canvas.drawImage(
-        tile,
-        Offset(request.x * tileSize - left, request.y * tileSize - top),
-        Paint()..filterQuality = FilterQuality.medium,
-      );
+    // 배경을 먼저 깔고 겹침 레이어(도로·지명)를 위에 올린다.
+    for (final group in <List<({int x, int y, Future<ui.Image?> image})>>[
+      base,
+      overlay,
+    ]) {
+      for (final request in group) {
+        final tile = await request.image;
+        if (tile == null) continue;
+        canvas.drawImage(
+          tile,
+          Offset(request.x * tileSize - left, request.y * tileSize - top),
+          Paint()..filterQuality = FilterQuality.medium,
+        );
+      }
     }
 
     _drawMarker(canvas, Offset(size.width / 2, size.height / 2), size);
@@ -153,15 +177,21 @@ class VWorldService {
     }
   }
 
-  Future<ui.Image?> _tile(VWorldLayer layer, int z, int x, int y) async {
-    final key = '${layer.id}/$z/$y/$x';
+  Future<ui.Image?> _tile(
+    String layerId,
+    String extension,
+    int z,
+    int x,
+    int y,
+  ) async {
+    final key = '$layerId/$z/$y/$x';
     final cached = _tileCache[key];
     if (cached != null) return cached;
 
     try {
       final uri = Uri.https(
         'api.vworld.kr',
-        '/req/wmts/1.0.0/${AppConfig.vworldKey}/${layer.id}/$z/$y/$x.${layer.extension}',
+        '/req/wmts/1.0.0/${AppConfig.vworldKey}/$layerId/$z/$y/$x.$extension',
       );
       final response = await _client.get(uri);
       if (response.statusCode != 200) return null;
