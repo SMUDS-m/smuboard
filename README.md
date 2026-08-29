@@ -84,16 +84,93 @@ flutter run -d chrome -t lib/dev/sketch_preview.dart --dart-define=VWORLD_KEY=..
 
 ## 배포 전 설정
 
-두 가지를 등록해야 배포본이 동작한다. 값 자체는 저장소 Secret으로만 주입한다
-(`Settings → Secrets and variables → Actions`).
+배포본이 동작하려면 구글과 브이월드 두 곳에 등록이 필요하다. 키 값은 저장소
+Secret으로만 주입한다(`Settings → Secrets and variables → Actions`).
 
-| Secret | 발급처 | 함께 해야 할 등록 |
-|---|---|---|
-| `GOOGLE_WEB_CLIENT_ID` | Google Cloud 콘솔 → 사용자 인증 정보 → 웹 클라이언트 | 승인된 자바스크립트 원본에 `https://<계정>.github.io` 추가 |
-| `VWORLD_KEY` | 브이월드 오픈API | 서비스 URL(도메인)에 같은 주소 등록 |
+| Secret | 없으면 |
+|---|---|
+| `GOOGLE_WEB_CLIENT_ID` | 로그인 화면에서 더 진행되지 않는다 |
+| `VWORLD_KEY` | 약도가 빠진 채로 사진이 합성된다 |
 
-클라이언트 웹앱이라 두 값 모두 빌드 결과에 남는다. 실제 보호는 위 도메인 등록으로
-한다 — Secret은 저장소 소스와 커밋 이력에 키를 남기지 않기 위한 것이다.
+클라이언트 웹앱이라 두 값 모두 빌드 결과에 남는다. 실제 보호는 아래의 도메인
+등록으로 한다 — Secret은 저장소 소스와 커밋 이력에 키를 남기지 않기 위한 것이다.
+
+### 구글 설정
+
+Google Cloud 콘솔(<https://console.cloud.google.com>)에서 순서대로 한다.
+
+**1. 프로젝트 만들기**
+사용할 프로젝트를 하나 고르거나 새로 만든다.
+
+**2. API 사용 설정** — `API 및 서비스 → 라이브러리`
+
+- **Google Drive API**
+- **Google Sheets API** (집계표를 쓰므로 함께 필요하다)
+
+빠뜨리면 로그인은 되지만 업로드에서 `403 API has not been used` 오류가 난다.
+
+**3. OAuth 동의 화면** — `API 및 서비스 → OAuth 동의 화면`
+
+- User Type: 학교 계정만 쓸 거면 **내부**, 개인 구글 계정도 받으려면 **외부**
+- 앱 이름 · 사용자 지원 이메일 · 개발자 연락처를 채운다
+- 범위(스코프)에 `.../auth/drive.file` 추가
+- **외부**로 만들었고 게시 상태가 *테스트*라면, 로그인할 계정을 **테스트 사용자**에
+  모두 등록해야 한다. 등록하지 않은 계정은 로그인 자체가 거부된다
+
+`drive.file`은 앱이 만든 파일에만 접근하는 비민감 스코프라, 민감·제한 스코프처럼
+별도 보안 심사를 요구하지 않는다. 사용 인원이 늘면 테스트 상태로 두지 말고 게시
+상태를 프로덕션으로 올리는 편이 낫다(테스트 상태의 토큰은 주기적으로 만료된다).
+
+**4. 클라이언트 ID 만들기** — `API 및 서비스 → 사용자 인증 정보 → 사용자 인증 정보 만들기 → OAuth 클라이언트 ID`
+
+- 애플리케이션 유형: **웹 애플리케이션**
+- **승인된 자바스크립트 원본**에 아래를 추가한다. 경로(`/smuboard/`)는 넣지 않는다 —
+  원본은 스킴 + 호스트 + 포트까지다.
+
+  ```
+  https://smuds-m.github.io
+  http://localhost:8099      ← 로컬에서 돌려볼 때만
+  ```
+
+- **승인된 리디렉션 URI**는 비워 둬도 된다. 이 앱은 Google Identity Services
+  방식이라 리디렉션을 쓰지 않는다.
+
+만들면 `...apps.googleusercontent.com` 형태의 클라이언트 ID가 나온다. 클라이언트
+보안 비밀번호(secret)는 이 앱에서 쓰지 않는다.
+
+**5. 저장소에 등록하고 재배포**
+
+```bash
+gh secret set GOOGLE_WEB_CLIENT_ID -R SMUDS-m/smuboard
+gh workflow run deploy.yml -R SMUDS-m/smuboard
+```
+
+로컬에서 돌려볼 때는 `--dart-define`으로 같은 값을 넘긴다.
+
+```bash
+flutter run -d chrome --dart-define=GOOGLE_WEB_CLIENT_ID=...apps.googleusercontent.com
+```
+
+### 브이월드 설정
+
+브이월드 오픈API(<https://www.vworld.kr>)에서 인증키를 발급받고, **서비스
+URL(도메인)** 에 배포 주소를 등록한다.
+
+```
+smuds-m.github.io
+```
+
+등록하지 않으면 타일 요청이 이미지 대신 오류 XML을 돌려주고, 앱은 약도 없이
+합성을 계속한다(사진 자체는 정상 저장된다).
+
+### 안 될 때
+
+| 증상 | 원인 |
+|---|---|
+| 로그인 창이 뜨자마자 닫힘 | 승인된 자바스크립트 원본에 접속 주소가 없음. 경로를 붙여 넣지 않았는지 확인 |
+| `앱이 차단되었습니다` | 게시 상태가 *테스트*인데 로그인 계정이 테스트 사용자에 없음 |
+| 업로드에서 403 | Drive API 또는 Sheets API 사용 설정이 안 됨 |
+| 사진은 되는데 약도만 없음 | 브이월드 키 미주입 또는 도메인 미등록 |
 
 ## OAuth 스코프
 
