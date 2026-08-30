@@ -10,10 +10,15 @@ Future<void> main() async {
   await initializeDateFormatting('ko_KR');
 
   final services = AppServices();
-  // 이전 로그인 복구는 첫 화면을 막지 않도록 백그라운드로 돌린다.
-  services.auth.initialize().catchError(
-    (Object e) => debugPrint('로그인 복구 실패: $e'),
-  );
+
+  // 첫 화면을 막지 않도록 백그라운드로 돌린다. 드라이브를 부르려면 로그인
+  // 복구가 먼저 끝나야 하므로, 지난 세션에서 못 올린 사진은 그 뒤에 잇는다.
+  services.auth
+      .initialize()
+      .then((_) => services.queue.resume())
+      .catchError((Object e, StackTrace s) {
+        debugPrint('시작 복구 실패: $e\n$s');
+      });
 
   runApp(SmuBoardApp(services: services));
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:googleapis_auth/googleapis_auth.dart' as gapis;
@@ -54,7 +55,15 @@ class GoogleAuthService {
       onError: (Object _) => _set(null),
     );
 
-    await GoogleSignIn.instance.attemptLightweightAuthentication();
+    // 조용한 로그인 복구는 실패할 수 있다(구글 세션 없음, FedCM 차단 등).
+    // 여기서 예외가 새어 나가면 initialize()가 실패로 끝나면서 뒤에 이어지는
+    // 업로드 큐 복구까지 함께 막힌다. 복구 실패는 로그인 화면을 보여 주면
+    // 되는 일이지, 앱 시작을 중단시킬 일이 아니다.
+    try {
+      await GoogleSignIn.instance.attemptLightweightAuthentication();
+    } catch (e, stack) {
+      debugPrint('조용한 로그인 복구 실패(로그인 화면으로 진행): $e\n$stack');
+    }
   }
 
   /// 대화형 로그인. 버튼 탭에서만 호출해야 한다.
