@@ -27,6 +27,14 @@ class AppConfig {
 
   static bool get hasVWorldKey => vworldKey.isNotEmpty;
 
+  /// 로그인 없이 메인 화면까지 들어가는 개발용 우회.
+  ///
+  /// `--dart-define=ALLOW_GUEST=true`로 빌드할 때만 켜진다. 배포 워크플로는 이
+  /// 값을 넘기지 않으므로 배포본은 로그인 게이트를 그대로 유지한다.
+  /// 게스트 상태에서도 촬영과 조사표 작성은 되지만, 드라이브 업로드는
+  /// 로그인해야 시작된다.
+  static const bool allowGuest = bool.fromEnvironment('ALLOW_GUEST');
+
   /// `GoogleSignIn.initialize`에 넘길 클라이언트 ID.
   static String? get googleClientId {
     if (kIsWeb) return _orNull(_webClientId);

@@ -21,10 +21,12 @@ class UploadQueue extends ChangeNotifier {
     required DriveService drive,
     required SurveyStore store,
     required Connectivity connectivity,
+    required bool Function() canUpload,
   }) : _blobs = blobs,
        _drive = drive,
        _store = store,
-       _connectivity = connectivity {
+       _connectivity = connectivity,
+       _canUpload = canUpload {
     _subscription = _connectivity.changes.listen((online) {
       if (online) {
         // 연결이 돌아오면 물러난 대기 시간을 접고 바로 시도한다.
@@ -39,6 +41,12 @@ class UploadQueue extends ChangeNotifier {
   final DriveService _drive;
   final SurveyStore _store;
   final Connectivity _connectivity;
+
+  /// 지금 드라이브를 부를 수 있는지(= 로그인 상태인지).
+  ///
+  /// 게스트로 둘러보는 중에는 업로드를 시도해 봐야 실패만 쌓인다. 통신이 없는
+  /// 것과 같이 취급해 조용히 대기시킨다.
+  final bool Function() _canUpload;
 
   StreamSubscription<bool>? _subscription;
   Timer? _retryTimer;
@@ -65,6 +73,12 @@ class UploadQueue extends ChangeNotifier {
   int get pendingCount => _pending;
 
   bool get isOnline => _connectivity.isOnline;
+
+  /// 로그인이 되어 있어 업로드를 시도할 수 있는 상태인지.
+  bool get canUpload => _canUpload();
+
+  /// 지금 실제로 올릴 수 있는 조건인지.
+  bool get _ready => _connectivity.isOnline && _canUpload();
 
   bool get isDraining => _drainTask != null;
 
@@ -143,7 +157,7 @@ class UploadQueue extends ChangeNotifier {
 
         var changed = false;
         for (final photo in waiting) {
-          if (!_connectivity.isOnline) {
+          if (!_ready) {
             pending += 1;
             failed = true;
             continue;

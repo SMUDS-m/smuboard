@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import 'app_services.dart';
+import 'config/app_config.dart';
 import 'screens/login_screen.dart';
 import 'screens/survey_list_screen.dart';
 
@@ -63,9 +64,11 @@ class _AuthGateState extends State<_AuthGate> {
       stream: auth.accountChanges,
       initialData: auth.account,
       builder: (context, snapshot) {
-        return snapshot.data == null
-            ? const LoginScreen()
-            : const SurveyListScreen();
+        if (snapshot.data != null) return const SurveyListScreen();
+        // 개발용 우회. 배포 빌드에서는 ALLOW_GUEST가 꺼져 있어 항상 로그인 화면이다.
+        return AppConfig.allowGuest
+            ? const SurveyListScreen()
+            : const LoginScreen();
       },
     );
   }

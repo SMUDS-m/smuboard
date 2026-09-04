@@ -235,7 +235,8 @@ class _CaptureScreenState extends State<CaptureScreen> {
                 ],
               ),
 
-              if (!services.queue.isOnline || pending > 0) ...<Widget>[
+              if (!services.queue.isOnline || !services.queue.canUpload || pending > 0)
+                ...<Widget>[
                 const SizedBox(height: 14),
                 _QueueBanner(queue: services.queue, pending: pending),
               ],
@@ -410,12 +411,18 @@ class _QueueBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final offline = !queue.isOnline;
-    final tone = offline
+    final signedOut = !queue.canUpload;
+    final tone = offline || signedOut
         ? theme.colorScheme.tertiary
         : theme.colorScheme.primary;
 
     final String message;
-    if (offline) {
+    if (signedOut) {
+      // 통신 문제로 오해하지 않도록 원인을 그대로 말한다.
+      message = pending > 0
+          ? '로그인하지 않은 상태입니다. 사진 $pending장이 기기에 보관돼 있고, 로그인하면 올라갑니다.'
+          : '로그인하지 않은 상태입니다. 촬영은 기기에 보관되고, 로그인하면 올라갑니다.';
+    } else if (offline) {
       message = pending > 0
           ? '오프라인입니다. 사진 $pending장이 기기에 보관돼 있고, 연결되면 자동으로 올라갑니다.'
           : '오프라인입니다. 촬영은 계속할 수 있고, 연결되면 자동으로 올라갑니다.';
@@ -448,7 +455,7 @@ class _QueueBanner extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(message, style: theme.textTheme.bodySmall),
-                if (queue.lastError != null && !offline) ...<Widget>[
+                if (queue.lastError != null && !offline && !signedOut) ...<Widget>[
                   const SizedBox(height: 4),
                   Text(
                     queue.lastError!,

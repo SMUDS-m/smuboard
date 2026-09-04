@@ -32,6 +32,7 @@ class AppServices {
       drive: drive,
       store: store,
       connectivity: connectivity,
+      canUpload: () => auth.isSignedIn,
     );
     photos = PhotoPipeline(
       composer: BoardComposer(vworld),

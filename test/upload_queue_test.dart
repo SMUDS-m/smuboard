@@ -70,6 +70,7 @@ void main() {
   late SurveyStore store;
   late UploadQueue queue;
   var sharedQueueDisposed = false;
+  var signedIn = true;
 
   /// 공용 큐도 연결 이벤트를 듣는다. 재시작 시나리오처럼 큐가 하나뿐이어야
   /// 하는 테스트에서는 먼저 이것을 닫는다.
@@ -95,11 +96,13 @@ void main() {
     connectivity = _FakeConnectivity();
     store = SurveyStore();
     sharedQueueDisposed = false;
+    signedIn = true;
     queue = UploadQueue(
       blobs: blobs,
       drive: drive,
       store: store,
       connectivity: connectivity,
+      canUpload: () => signedIn,
     );
   });
 
@@ -250,6 +253,33 @@ void main() {
     expect(await blobs.keys(), isEmpty);
   });
 
+  test('로그인 전에는 올리지 않고 기기에 보관만 한다', () async {
+    // 게스트로 둘러보는 개발 빌드에서 업로드 실패가 쌓이지 않아야 한다.
+    signedIn = false;
+    final survey = newSurvey();
+    final photo = newPhoto('p1');
+    survey.photos.add(photo);
+
+    await queue.enqueue(
+      survey: survey,
+      photo: photo,
+      full: bytesOf(90, 1),
+      thumbnail: bytesOf(12, 2),
+    );
+
+    expect(queue.canUpload, isFalse);
+    expect(drive.uploaded, isEmpty);
+    expect(photo.state, UploadState.pending);
+    expect(photo.error, isNull, reason: '로그인 전 대기는 실패가 아니다');
+    expect(await blobs.get(UploadQueue.fullKey('p1')), hasLength(90));
+
+    // 로그인하면 그대로 올라간다.
+    signedIn = true;
+    await queue.drain();
+    expect(drive.uploaded, hasLength(1));
+    expect(photo.state, UploadState.done);
+  });
+
   test('지난 세션의 대기분을 시작 시 이어서 올린다', () async {
     // 이 시나리오는 큐를 두 번(닫히기 전/후) 만들어야 해서 공용 큐를 쓰지 않는다.
     UploadQueue build() => UploadQueue(
@@ -257,6 +287,7 @@ void main() {
       drive: drive,
       store: store,
       connectivity: connectivity,
+      canUpload: () => signedIn,
     );
 
     disposeSharedQueue();

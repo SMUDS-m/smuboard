@@ -119,6 +119,7 @@ class _HarnessState extends State<_Harness> {
     drive: _drive,
     store: _store,
     connectivity: _connectivity,
+    canUpload: () => true, // 하네스는 가짜 드라이브를 쓴다.
   );
   late final PhotoPipeline _pipeline = PhotoPipeline(
     composer: BoardComposer(_vworld, maxEdge: 1400),

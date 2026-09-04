@@ -3,7 +3,9 @@ import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import '../app_services.dart';
+import '../config/app_config.dart';
 import '../models/survey.dart';
+import '../services/google_auth_service.dart';
 import '../services/upload_queue.dart';
 import '../widgets/smuds_logo.dart';
 import 'survey_overview_screen.dart';
@@ -62,6 +64,22 @@ class _SurveyListScreenState extends State<SurveyListScreen> {
     await AppScope.of(context).auth.signOut();
   }
 
+  /// 게스트로 들어온 뒤 여기서 로그인하면 대기 중이던 사진이 곧바로 올라간다.
+  Future<void> _signIn() async {
+    try {
+      final account = await AppScope.of(context).auth.signIn();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${account.email} 계정으로 로그인했습니다.')),
+      );
+      await AppScope.of(context).queue.drain();
+    } on GoogleAuthException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final surveys = _surveys;
@@ -73,7 +91,13 @@ class _SurveyListScreenState extends State<SurveyListScreen> {
         title: const SmudsLogo(height: 30),
         actions: <Widget>[
           _PendingIndicator(queue: AppScope.of(context).queue),
-          if (account != null)
+          if (account == null)
+            TextButton.icon(
+              onPressed: _signIn,
+              icon: const Icon(Icons.login, size: 18),
+              label: const Text('로그인'),
+            )
+          else
             PopupMenuButton<String>(
               tooltip: account.email,
               icon: CircleAvatar(
@@ -108,7 +132,17 @@ class _SurveyListScreenState extends State<SurveyListScreen> {
       ),
       body: surveys == null
           ? const Center(child: CircularProgressIndicator())
-          : Center(
+          : Column(
+              children: <Widget>[
+                if (account == null) const _GuestBanner(),
+                Expanded(child: _list(surveys)),
+              ],
+            ),
+    );
+  }
+
+  Widget _list(List<Survey> surveys) {
+    return Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 620),
                 child: surveys.isEmpty
@@ -125,7 +159,40 @@ class _SurveyListScreenState extends State<SurveyListScreen> {
                         ),
                       ),
               ),
+            );
+  }
+}
+
+/// 로그인하지 않은 채 들어와 있다는 사실을 화면에 계속 붙여 둔다.
+///
+/// 조사와 촬영은 되지만 드라이브로는 아무것도 나가지 않는 상태이므로,
+/// 이걸 모르고 현장에서 쓰면 다 올라간 줄 알게 된다.
+class _GuestBanner extends StatelessWidget {
+  const _GuestBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      color: theme.colorScheme.tertiaryContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: <Widget>[
+          Icon(Icons.info_outline, size: 18, color: theme.colorScheme.onTertiaryContainer),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              AppConfig.allowGuest
+                  ? '로그인하지 않은 상태입니다. 촬영은 기기에 저장되고, 로그인해야 드라이브로 올라갑니다.'
+                  : '로그인이 필요합니다.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onTertiaryContainer,
+              ),
             ),
+          ),
+        ],
+      ),
     );
   }
 }
